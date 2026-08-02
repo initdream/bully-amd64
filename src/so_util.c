@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include "so_util.h"
 #include <dlfcn.h>
 #include <elf.h>
