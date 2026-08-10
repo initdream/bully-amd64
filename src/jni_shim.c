@@ -724,9 +724,15 @@ void jni_load(void) {
   extern volatile int g_rk_pending_initial, g_rk_pending_gate, g_rk_pending_gate_type;
   int rk_fired = 0, rk_signin = 0;
 
-  for (int f = 0; OnDrawFrame; f++) {
+  Uint32 start_ticks = SDL_GetTicks();
+
+  Uint64 last_time = SDL_GetPerformanceCounter();
+  Uint64 perf_freq = SDL_GetPerformanceFrequency();
+
+  for (unsigned long f = 0; OnDrawFrame; f++) {
     extern unsigned long g_frame_no;
-    g_frame_no = (unsigned long)f;
+    g_frame_no = f;
+
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
       if (e.type == SDL_QUIT) return;
@@ -738,7 +744,9 @@ void jni_load(void) {
 
     if (canRender) *canRender = 1;
 
-    if (!rk_fired && (g_rk_pending_initial || g_rk_pending_gate) && f > 30) {
+    Uint32 elapsed_ms = SDL_GetTicks() - start_ticks;
+
+    if (!rk_fired && (g_rk_pending_initial || g_rk_pending_gate) && elapsed_ms > 450) {
       rk_fired = 1;
       int gt = g_rk_pending_gate ? g_rk_pending_gate_type : 0;
       if (OS_StateChanged) OS_StateChanged(0);
@@ -752,12 +760,18 @@ void jni_load(void) {
       g_rk_pending_initial = g_rk_pending_gate = 0;
       rk_signin = 1;
     }
-    if (rk_signin && f > 45) {
+
+    if (rk_signin && elapsed_ms > 700) {
       rk_signin = 0;
       if (OS_SignInComplete) OS_SignInComplete();
     }
 
-    OnDrawFrame(fake_env, NULL, 1.0f / 60.0f);
-    SDL_Delay(16);
+    Uint64 current_time = SDL_GetPerformanceCounter();
+    float dt = (float)(current_time - last_time) / (float)perf_freq;
+    last_time = current_time;
+
+    if (dt <= 0.0f) dt = 1.0f / 30.0f;
+
+    OnDrawFrame(fake_env, NULL, dt);
   }
 }

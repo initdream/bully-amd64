@@ -12,6 +12,8 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <SDL2/SDL.h>
+
 #include "so_util.h"
 #include "jni_shim.h"
 #include "zip_fs.h"
@@ -240,6 +242,14 @@ void bully_imports_init(void) {
   ctype_init();
 }
 
+static unsigned my_eglSwapInterval(void *dpy, int interval) {
+  (void)dpy;
+  if (SDL_GL_SetSwapInterval(interval) == 0) {
+    return 1;
+  }
+  return 0;
+}
+
 extern void bully_swap_buffers(void);
 extern int  bully_is_kmsdrm(void);
 static unsigned (*real_eglSwapBuffers)(void*, void*) = NULL;
@@ -258,6 +268,7 @@ DynLibFunction bully_stub_table[] = {
   {"fputc", (uintptr_t)w_fputc},
   {"fflush", (uintptr_t)w_fflush},
   {"eglSwapBuffers", (uintptr_t)my_eglSwapBuffers},
+  {"eglSwapInterval", (uintptr_t)my_eglSwapInterval},
   {"__errno", (uintptr_t)bionic___errno},
   {"__assert2", (uintptr_t)b_assert2},
   {"__strlen_chk", (uintptr_t)b_strlen_chk},
