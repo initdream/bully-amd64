@@ -2,6 +2,10 @@
 
 Port of Bully: Anniversary Edition (Android x86_64) to Linux x86_64.
 
+## Screenshots
+
+<img src="images/Screenshot_2026-08-10_20-53-54.png" width="49%"> <img src="images/Screenshot_2026-08-10_20-57-39.png" width="49%">
+
 ## Requirements
 
 - An **x86_64** GNU/Linux distribution
