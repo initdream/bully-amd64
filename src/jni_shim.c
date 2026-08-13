@@ -23,14 +23,16 @@ extern int bully_init_gl(void);
 extern int bully_make_current(void);
 extern void bully_release_current(void);
 extern void bully_egl_objects(uintptr_t *d, uintptr_t *s, uintptr_t *c);
+extern void shadows_init(void);
+extern void shadows_apply(void);
 
 #define DATA_PATH "."
 
 enum {
   UNKNOWN = 0, INIT_EGL_AND_GLES2, SWAP_BUFFERS, MAKE_CURRENT, UN_MAKE_CURRENT, SHARE_TEXT, SHARE_IMAGE,
   HAS_APP_LOCAL_VALUE, GET_APP_LOCAL_VALUE, SET_APP_LOCAL_VALUE, GET_PARAMETER, FILE_GET_ARCHIVE_NAME,
-  DELETE_FILE, GET_DEVICE_INFO, GET_DEVICE_TYPE, GET_DEVICE_LOCALE, GET_GAMEPAD_TYPE, GET_GAMEPAD_BUTTONS,
-  GET_GAMEPAD_AXIS, ROCKSTAR_SHOW_INITIAL, ROCKSTAR_SHOW_GATE,
+  DELETE_FILE, GET_DEVICE_INFO, GET_DEVICE_TYPE, GET_DEVICE_LOCALE,
+  ROCKSTAR_SHOW_INITIAL, ROCKSTAR_SHOW_GATE,
 };
 
 static struct { const char *name; int id; } method_ids[] = {
@@ -42,13 +44,11 @@ static struct { const char *name; int id; } method_ids[] = {
   {"setAppLocalValue", SET_APP_LOCAL_VALUE}, {"getParameter", GET_PARAMETER},
   {"FileGetArchiveName", FILE_GET_ARCHIVE_NAME}, {"DeleteFile", DELETE_FILE},
   {"GetDeviceInfo", GET_DEVICE_INFO}, {"GetDeviceType", GET_DEVICE_TYPE},
-  {"GetDeviceLocale", GET_DEVICE_LOCALE}, {"GetGamepadType", GET_GAMEPAD_TYPE},
-  {"GetGamepadButtons", GET_GAMEPAD_BUTTONS}, {"GetGamepadAxis", GET_GAMEPAD_AXIS},
+  {"GetDeviceLocale", GET_DEVICE_LOCALE},
 };
 
 static char fake_vm[0x1000];
 static char fake_env[0x1000];
-static void *natives;
 static SDL_GameController *g_pad;
 
 static int GetDeviceType(void) { return (2048 << 6) | (3 << 2) | 0x1; }
@@ -65,13 +65,6 @@ static char *FileGetArchiveName(int type) {
   if (type == 1) return (char *)"main.obb";
   if (type == 2) return (char *)"patch.obb";
   return NULL;
-}
-
-static int GetGamepadType(int port) {
-  if (port != 0) return -1;
-  static int t = -99;
-  if (t == -99) { const char *e = getenv("BULLY_PAD_TYPE"); t = e ? atoi(e) : 8; }
-  return t;
 }
 
 static void check_exit_hotkey(void) {
@@ -91,66 +84,6 @@ static int gptk_mode(void) {
 }
 static unsigned char g_kb[SDL_NUM_SCANCODES];
 static int g_mxrel, g_myrel;
-
-static int GetGamepadButtons(int port) {
-  if (port != 0) return 0;
-  if (gptk_mode()) {
-    int m = 0;
-    if (g_kb[SDL_SCANCODE_X]) m |= 0x1;
-    if (g_kb[SDL_SCANCODE_C]) m |= 0x2;
-    if (g_kb[SDL_SCANCODE_Q]) m |= 0x4;
-    if (g_kb[SDL_SCANCODE_T]) m |= 0x8;
-    if (g_kb[SDL_SCANCODE_RETURN]) m |= 0x10;
-    if (g_kb[SDL_SCANCODE_ESCAPE]) m |= 0x20;
-    if (g_kb[SDL_SCANCODE_H]) m |= 0x40;
-    if (g_kb[SDL_SCANCODE_J]) m |= 0x80;
-    if (g_kb[SDL_SCANCODE_LEFT]) m |= 0x400;
-    if (g_kb[SDL_SCANCODE_RIGHT]) m |= 0x800;
-    if (g_kb[SDL_SCANCODE_N]) m |= 0x1000;
-    if (g_kb[SDL_SCANCODE_M]) m |= 0x2000;
-    return m;
-  }
-  if (!g_pad) return 0;
-  SDL_GameControllerUpdate();
-  check_exit_hotkey();
-  int m = 0;
-  struct { int b; int mask; } map[] = {
-    {SDL_CONTROLLER_BUTTON_A, 0x1}, {SDL_CONTROLLER_BUTTON_B, 0x2},
-    {SDL_CONTROLLER_BUTTON_X, 0x4}, {SDL_CONTROLLER_BUTTON_Y, 0x8},
-    {SDL_CONTROLLER_BUTTON_START, 0x10}, {SDL_CONTROLLER_BUTTON_BACK, 0x20},
-    {SDL_CONTROLLER_BUTTON_LEFTSHOULDER, 0x40}, {SDL_CONTROLLER_BUTTON_RIGHTSHOULDER, 0x80},
-    {SDL_CONTROLLER_BUTTON_DPAD_UP, 0x100}, {SDL_CONTROLLER_BUTTON_DPAD_DOWN, 0x200},
-    {SDL_CONTROLLER_BUTTON_DPAD_LEFT, 0x400}, {SDL_CONTROLLER_BUTTON_DPAD_RIGHT, 0x800},
-    {SDL_CONTROLLER_BUTTON_LEFTSTICK, 0x1000}, {SDL_CONTROLLER_BUTTON_RIGHTSTICK, 0x2000},
-  };
-  for (unsigned i = 0; i < sizeof(map) / sizeof(map[0]); i++) {
-    if (SDL_GameControllerGetButton(g_pad, map[i].b)) m |= map[i].mask;
-  }
-  return m;
-}
-
-static float GetGamepadAxis(int port, int axis) {
-  if (port != 0) return 0.0f;
-  if (gptk_mode()) {
-    if (axis == 4) return g_kb[SDL_SCANCODE_K] ? 1.0f : 0.0f;
-    if (axis == 5) return g_kb[SDL_SCANCODE_L] ? 1.0f : 0.0f;
-    if (!g_pad) {
-      switch (axis) {
-        case 0: return (g_kb[SDL_SCANCODE_D] ? 1.0f : 0.0f) - (g_kb[SDL_SCANCODE_A] ? 1.0f : 0.0f);
-        case 1: return (g_kb[SDL_SCANCODE_S] ? 1.0f : 0.0f) - (g_kb[SDL_SCANCODE_W] ? 1.0f : 0.0f);
-      }
-      return 0.0f;
-    }
-  }
-  if (!g_pad) return 0.0f;
-  SDL_GameControllerAxis ax[] = {
-    SDL_CONTROLLER_AXIS_LEFTX,       SDL_CONTROLLER_AXIS_LEFTY,
-    SDL_CONTROLLER_AXIS_RIGHTX,      SDL_CONTROLLER_AXIS_RIGHTY,
-    SDL_CONTROLLER_AXIS_TRIGGERLEFT, SDL_CONTROLLER_AXIS_TRIGGERRIGHT};
-    if (axis < 0 || axis > 5) return 0.0f;
-    float v = SDL_GameControllerGetAxis(g_pad, ax[axis]) / 32768.0f;
-  return fabsf(v) > 0.25f ? v : 0.0f;
-}
 
 void gptk_event(void *ev) {
   SDL_Event *e = (SDL_Event *)ev;
@@ -244,44 +177,70 @@ static const struct { int sdl; int game; } g_btnmap[] = {
   {SDL_CONTROLLER_BUTTON_LEFTSTICK, 16}, {SDL_CONTROLLER_BUTTON_RIGHTSTICK, 18},
 };
 
-static void pump_gamepad(void) {
-  static void (*down)(void *, void *, int, int) = NULL;
-  static void (*up)(void *, void *, int, int) = NULL;
-  static void (*axesfn)(void *, void *, int, float, float, float, float, float, float) = NULL;
-  static void (*countfn)(void *, void *, int) = NULL;
-  static int inited = 0, last[20] = {0};
-  static float la[6] = {0};
+static void (*g_pump_down)(void *, void *, int, int) = NULL;
+static void (*g_pump_up)(void *, void *, int, int) = NULL;
+static void (*g_pump_axes)(void *, void *, int, float, float, float, float, float, float) = NULL;
+static void (*g_pump_count)(void *, void *, int) = NULL;
+static int g_pump_inited = 0;
+static int g_pump_last[20] = {0};
+static float g_pump_la[6] = {0};
+
+static void gamepad_reset(void) {
+  g_pump_inited = 0;
+  memset(g_pump_last, 0, sizeof(g_pump_last));
+  memset(g_pump_la, 0, sizeof(g_pump_la));
+}
+
+static void gamepad_connect(int which) {
+  if (!SDL_IsGameController(which) || g_pad) return;
+  g_pad = SDL_GameControllerOpen(which);
   if (!g_pad) return;
-  if (!inited) {
+  fprintf(stderr, "[pad] connected: %s\n",
+          SDL_GameControllerName(g_pad) ? SDL_GameControllerName(g_pad) : "?");
+  gamepad_reset();
+}
+
+static void gamepad_disconnect(SDL_JoystickID instance) {
+  if (!g_pad) return;
+  if (SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(g_pad)) != instance) return;
+  SDL_GameControllerClose(g_pad);
+  g_pad = NULL;
+  gamepad_reset();
+  fprintf(stderr, "[pad] disconnected\n");
+}
+
+static void pump_gamepad(void) {
+  if (!g_pad) return;
+  if (!g_pump_inited) {
     #define GP(n) (void *)so_symbol(&mod_game, "Java_com_rockstargames_oswrapper_GameNative_" n)
-    down = GP("implOnGamepadButtonDown");
-    up = GP("implOnGamepadButtonUp");
-    axesfn = GP("implOnGamepadAxesChanged");
-    countfn = GP("implOnGamepadCountChanged");
+    g_pump_down = GP("implOnGamepadButtonDown");
+    g_pump_up = GP("implOnGamepadButtonUp");
+    g_pump_axes = GP("implOnGamepadAxesChanged");
+    g_pump_count = GP("implOnGamepadCountChanged");
     #undef GP
-    if (countfn) countfn(fake_env, NULL, 1);
-    inited = 1;
+    if (g_pump_count) g_pump_count(fake_env, NULL, 1);
+    g_pump_inited = 1;
   }
   SDL_GameControllerUpdate();
   check_exit_hotkey();
   for (unsigned i = 0; i < sizeof(g_btnmap) / sizeof(g_btnmap[0]); i++) {
     int g = g_btnmap[i].game;
     int p = SDL_GameControllerGetButton(g_pad, g_btnmap[i].sdl) ? 1 : 0;
-    if (p != last[g]) {
-      if (p) { if (down) down(fake_env, NULL, 0, g); }
-      else { if (up) up(fake_env, NULL, 0, g); }
-      last[g] = p;
+    if (p != g_pump_last[g]) {
+      if (p) { if (g_pump_down) g_pump_down(fake_env, NULL, 0, g); }
+      else { if (g_pump_up) g_pump_up(fake_env, NULL, 0, g); }
+      g_pump_last[g] = p;
     }
   }
   int lt = SDL_GameControllerGetAxis(g_pad, SDL_CONTROLLER_AXIS_TRIGGERLEFT) > 12000 ? 1 : 0;
   int rt = SDL_GameControllerGetAxis(g_pad, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) > 12000 ? 1 : 0;
-  if (lt != last[17]) {
-    if (lt) { if (down) down(fake_env, NULL, 0, 17); } else if (up) up(fake_env, NULL, 0, 17);
-    last[17] = lt;
+  if (lt != g_pump_last[17]) {
+    if (lt) { if (g_pump_down) g_pump_down(fake_env, NULL, 0, 17); } else if (g_pump_up) g_pump_up(fake_env, NULL, 0, 17);
+    g_pump_last[17] = lt;
   }
-  if (rt != last[19]) {
-    if (rt) { if (down) down(fake_env, NULL, 0, 19); } else if (up) up(fake_env, NULL, 0, 19);
-    last[19] = rt;
+  if (rt != g_pump_last[19]) {
+    if (rt) { if (g_pump_down) g_pump_down(fake_env, NULL, 0, 19); } else if (g_pump_up) g_pump_up(fake_env, NULL, 0, 19);
+    g_pump_last[19] = rt;
   }
   float a[6];
   a[0] = SDL_GameControllerGetAxis(g_pad, SDL_CONTROLLER_AXIS_LEFTX) / 32768.0f;
@@ -290,11 +249,14 @@ static void pump_gamepad(void) {
   a[3] = SDL_GameControllerGetAxis(g_pad, SDL_CONTROLLER_AXIS_RIGHTY) / 32768.0f;
   a[4] = SDL_GameControllerGetAxis(g_pad, SDL_CONTROLLER_AXIS_TRIGGERLEFT) / 32768.0f;
   a[5] = SDL_GameControllerGetAxis(g_pad, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) / 32768.0f;
+  for (int i = 0; i < 4; i++) if (fabsf(a[i]) < 0.15f) a[i] = 0.0f;
+  if (a[4] < 0.15f) a[4] = 0.0f;
+  if (a[5] < 0.15f) a[5] = 0.0f;
   int ch = 0;
-  for (int i = 0; i < 6; i++) if (fabsf(a[i] - la[i]) > 0.02f) { ch = 1; break; }
-  if (ch && axesfn) {
-    axesfn(fake_env, NULL, 0, a[0], a[1], a[2], a[3], a[4], a[5]);
-    for (int i = 0; i < 6; i++) la[i] = a[i];
+  for (int i = 0; i < 6; i++) if (fabsf(a[i] - g_pump_la[i]) > 0.02f) { ch = 1; break; }
+  if (ch && g_pump_axes) {
+    g_pump_axes(fake_env, NULL, 0, a[0], a[1], a[2], a[3], a[4], a[5]);
+    for (int i = 0; i < 6; i++) g_pump_la[i] = a[i];
   }
 }
 
@@ -321,16 +283,13 @@ static int CallBooleanMethodV(void *e, void *o, int id, va_list a) {
 }
 
 static float CallFloatMethodV(void *e, void *o, int id, va_list a) {
-  (void)e; (void)o;
-  if (id == GET_GAMEPAD_AXIS) { int p = va_arg(a, int); int ax = va_arg(a, int); return GetGamepadAxis(p, ax); }
+  (void)e; (void)o; (void)id; (void)a;
   return 0.0f;
 }
 
 static int CallIntMethodV(void *e, void *o, int id, va_list a) {
   (void)e; (void)o;
   switch (id) {
-    case GET_GAMEPAD_TYPE: return GetGamepadType(va_arg(a, int));
-    case GET_GAMEPAD_BUTTONS: return GetGamepadButtons(va_arg(a, int));
     case GET_DEVICE_TYPE: return GetDeviceType();
     case GET_DEVICE_INFO:
     case GET_DEVICE_LOCALE: return 0;
@@ -364,7 +323,7 @@ static void *FindClass(void *e, const char *n) { (void)e; (void)n; return (void 
 static void *NewGlobalRef(void *e, void *o) { (void)e; return o ? o : (void *)0x42424242; }
 static char *NewStringUTF(void *e, char *b) { (void)e; return b ? b : (char *)""; }
 static char *GetStringUTFChars(void *e, char *s, int *c) { (void)e; if (c) *c = 0; return s ? s : (char *)""; }
-static void RegisterNatives(void *e, void *cls, void *methods, int n) { (void)e; (void)cls; (void)n; natives = methods; }
+static void RegisterNatives(void *e, void *cls, void *methods, int n) { (void)e; (void)cls; (void)methods; (void)n; }
 void *NVThreadGetCurrentJNIEnv(void) { return fake_env; }
 
 static void *CallObjectMethod(void *e, void *o, int id, ...) { va_list a; va_start(a, id); void *r = CallObjectMethodV(e, o, id, a); va_end(a); return r; }
@@ -407,7 +366,7 @@ void jni_init_input(void) {
   int n = SDL_NumJoysticks();
   for (int i = 0; i < n; i++) {
     if (SDL_IsGameController(i) && !g_pad) {
-      g_pad = SDL_GameControllerOpen(i);
+      gamepad_connect(i);
     }
   }
   if (!g_pad && n > 0) {
@@ -417,7 +376,7 @@ void jni_init_input(void) {
       "leftshoulder:b4,rightshoulder:b5,"
       "dpup:h0.1,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,"
       "leftx:a0,lefty:a1,rightx:a2,righty:a3,platform:Linux,");
-    g_pad = SDL_GameControllerOpen(0);
+    gamepad_connect(0);
   }
 }
 
@@ -513,9 +472,8 @@ static void start_async_file_worker(void) {
   }
 }
 
-volatile int g_gamemain_alive = 0;
 typedef struct {
-  unsigned (*func)(void *); void *arg; char *handle; int is_gm;
+  unsigned (*func)(void *); void *arg; char *handle;
 } OsThreadData;
 
 static void *os_thread_entry(void *p) {
@@ -523,23 +481,19 @@ static void *os_thread_entry(void *p) {
   unsigned (*func)(void *) = td->func;
   void *arg = td->arg;
   char *h = td->handle;
-  int gm = td->is_gm;
   free(td);
   if (h) h[0x69] = 1;
-  if (gm) g_gamemain_alive = 1;
   int ret = func ? (int)func(arg) : 0;
   if (h) h[0x69] = 0;
-  if (gm) g_gamemain_alive = 2;
   return (void *)(intptr_t)ret;
 }
 
 static void *my_OS_ThreadLaunch(unsigned (*func)(void *), void *arg, unsigned r2, const char *name, int r4, int prio) {
-  (void)r2; (void)r4; (void)prio;
+  (void)name; (void)r2; (void)r4; (void)prio;
   char *h = calloc(1, 0x400);
   if (!h) return NULL;
   OsThreadData *td = malloc(sizeof(*td));
   td->func = func; td->arg = arg; td->handle = h;
-  td->is_gm = (name && strcmp(name, "GameMain") == 0);
   pthread_t t;
   if (pthread_create(&t, NULL, os_thread_entry, td) != 0) {
     free(td); free(h); return NULL;
@@ -650,6 +604,8 @@ void jni_load(void) {
   hook_screen();
   hook_cxa();
 
+  shadows_init();
+
   so_make_text_executable();
   so_flush_caches();
   asset_archive_init();
@@ -729,6 +685,8 @@ void jni_load(void) {
   Uint64 last_time = SDL_GetPerformanceCounter();
   Uint64 perf_freq = SDL_GetPerformanceFrequency();
 
+  shadows_apply();
+
   for (unsigned long f = 0; OnDrawFrame; f++) {
     extern unsigned long g_frame_no;
     g_frame_no = f;
@@ -736,6 +694,8 @@ void jni_load(void) {
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
       if (e.type == SDL_QUIT) return;
+      if (e.type == SDL_CONTROLLERDEVICEADDED) gamepad_connect(e.cdevice.which);
+      else if (e.type == SDL_CONTROLLERDEVICEREMOVED) gamepad_disconnect(e.cdevice.which);
       if (gptk_mode()) gptk_event(&e);
     }
 
@@ -765,6 +725,8 @@ void jni_load(void) {
       rk_signin = 0;
       if (OS_SignInComplete) OS_SignInComplete();
     }
+
+    if (elapsed_ms > 2000) shadows_apply();
 
     Uint64 current_time = SDL_GetPerformanceCounter();
     float dt = (float)(current_time - last_time) / (float)perf_freq;

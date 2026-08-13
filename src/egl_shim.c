@@ -13,10 +13,12 @@ SDL_GLContext g_gl_context = NULL;
 
 static int g_w = 1280, g_h = 720;
 static int g_is_kmsdrm = 0;
+static int g_opengles_version = 0;
 
 int bully_is_kmsdrm(void) { return g_is_kmsdrm; }
 int bully_screen_w(void) { return g_w; }
 int bully_screen_h(void) { return g_h; }
+int bully_opengles_version(void) { return g_opengles_version ? g_opengles_version : 196608; }
 
 int bully_init_gl(void) {
   if (g_gl_context) return 1;
@@ -37,6 +39,11 @@ int bully_init_gl(void) {
   if (SDL_GetDesktopDisplayMode(0, &dm) == 0 && dm.w > 0 && dm.h > 0) {
     g_w = dm.w; g_h = dm.h;
   }
+  const char *wenv = getenv("BULLY_W");
+  const char *henv = getenv("BULLY_H");
+  int windowed = (wenv && henv) ? 1 : 0;
+  if (wenv && atoi(wenv) > 0) g_w = atoi(wenv);
+  if (henv && atoi(henv) > 0) g_h = atoi(henv);
 
   int msaa = 0;
   { const char *e = getenv("BULLY_MSAA"); if (e) msaa = atoi(e); }
@@ -56,17 +63,21 @@ int bully_init_gl(void) {
       SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
       SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, msaa_try[j] ? 1 : 0);
       SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, msaa_try[j]);
+      Uint32 flags = SDL_WINDOW_OPENGL | (windowed ? SDL_WINDOW_RESIZABLE
+                                                   : SDL_WINDOW_FULLSCREEN_DESKTOP);
       g_window = SDL_CreateWindow("Bully", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
-                                  g_w, g_h, SDL_WINDOW_OPENGL | SDL_WINDOW_FULLSCREEN_DESKTOP);
+                                  g_w, g_h, flags);
       if (!g_window)
-        fprintf(stderr, "[sdl] CreateWindow alpha=%d msaa=%d: %s\n",
-                alpha_try[i], msaa_try[j], SDL_GetError());
+        fprintf(stderr, "[sdl] CreateWindow alpha=%d msaa=%d %s: %s\n",
+                alpha_try[i], msaa_try[j], windowed ? "win" : "fs", SDL_GetError());
     }
     if (!g_window) return 0;
 
     const char *drv = SDL_GetCurrentVideoDriver();
   g_is_kmsdrm = (drv && SDL_strcmp(drv, "mali") != 0) ? 1 : 0;
-  fprintf(stderr, "[gl] backend video='%s' kmsdrm=%d\n", drv?drv:"?", g_is_kmsdrm);
+  fprintf(stderr, "[gl] backend %s %dx%d video='%s' kmsdrm=%d\n",
+          windowed ? "windowed" : "fullscreen-desktop", g_w, g_h,
+          drv ? drv : "?", g_is_kmsdrm);
 
   g_gl_context = SDL_GL_CreateContext(g_window);
   if (!g_gl_context) {
@@ -75,10 +86,25 @@ int bully_init_gl(void) {
   }
   SDL_GL_MakeCurrent(g_window, g_gl_context);
 
+  glEnable(GL_DEPTH_TEST);
+  glDepthMask(GL_TRUE);
+  glEnable(GL_DITHER);
+  glClearDepthf(1.0f);
+  glClear(GL_DEPTH_BUFFER_BIT);
+
   const GLubyte *r = glGetString(GL_RENDERER), *v = glGetString(GL_VERSION);
   fprintf(stderr, "[gl] SDL2 GLES2 %dx%d | EGL dpy=%p surf=%p ctx=%p | %s / %s\n",
           g_w, g_h, (void*)eglGetCurrentDisplay(), (void*)eglGetCurrentSurface(EGL_DRAW),
           (void*)eglGetCurrentContext(), r ? (const char*)r : "?", v ? (const char*)v : "?");
+  if (v) {
+    int vm = 0, vn = 0;
+    g_opengles_version = sscanf((const char *)v, "OpenGL ES %d.%d", &vm, &vn) == 2
+        ? ((vm << 16) | (vn & 0xFFFF)) : 196608;
+    if (g_opengles_version < 0x20000) g_opengles_version = 0x20000;
+    if (g_opengles_version > 0x30002) g_opengles_version = 0x30002;
+  } else {
+    g_opengles_version = 196608;
+  }
   return 1;
 }
 
@@ -100,29 +126,8 @@ void bully_release_current(void) {
   SDL_GL_MakeCurrent(g_window, NULL);
 }
 
-static void bully_maybe_screenshot(void) {
-  static int chk = 0;
-  if (++chk % 15) return;
-  if (access("/dev/shm/bully_shot", F_OK) != 0) return;
-  unlink("/dev/shm/bully_shot");
-  int vp[4] = {0,0,0,0};
-  glGetIntegerv(GL_VIEWPORT, vp);
-  int w = vp[2], h = vp[3];
-  if (w <= 0 || h <= 0) return;
-  unsigned char *buf = malloc((size_t)w * h * 4);
-  if (!buf) return;
-  glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, buf);
-  FILE *o = fopen("/dev/shm/bully_shot.raw", "wb");
-  if (o) { fwrite(buf, 1, (size_t)w * h * 4, o); fclose(o); }
-  FILE *t = fopen("/dev/shm/bully_shot.txt", "w");
-  if (t) { fprintf(t, "%d %d\n", w, h); fclose(t); }
-  free(buf);
-  fprintf(stderr, "[shot] %dx%d saved to /dev/shm/bully_shot.raw\n", w, h);
-}
-
 void bully_swap_buffers(void) {
   if (g_window) {
-    bully_maybe_screenshot();
     SDL_GL_SwapWindow(g_window);
   }
 }

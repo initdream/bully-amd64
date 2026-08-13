@@ -19,7 +19,6 @@
 #include "zip_fs.h"
 
 unsigned long g_frame_no = 0;
-unsigned long g_fbo_binds = 0;
 
 /* ---- bionic libc bridges ---- */
 static int *bionic___errno(void) { extern int *__errno_location(void); return __errno_location(); }
@@ -146,30 +145,31 @@ static void aa_close(void *h) { AAsset *a = h; if (a) { fclose(a->fp); free(a); 
 
 static void b_set_abort_message(const char *m) { fprintf(stderr, "[abort_msg] %s\n", m ? m : "?"); }
 
+extern int bully_opengles_version(void);
 static int b_system_property_get(const char *name, char *value) {
   if (!name || !value) return 0;
-  if (strcmp(name, "ro.product.model") == 0) { strcpy(value, "ASUS_Z00AD"); return strlen(value); }
-  if (strcmp(name, "ro.product.manufacturer") == 0) { strcpy(value, "asus"); return strlen(value); }
-  if (strcmp(name, "ro.board.platform") == 0 || strcmp(name, "ro.hardware") == 0) { strcpy(value, "moorefield"); return strlen(value); }
+  if (strcmp(name, "ro.opengles.version") == 0) {
+    value[0] = 0;
+    return snprintf(value, 16, "%d", bully_opengles_version());
+  }
   value[0] = 0;
   return 0;
 }
 
 static void tl_noop(void) {}
 
-static char *str_replace_all(const char *src, const char *find, const char *repl) {
-  size_t fl = strlen(find), rl = strlen(repl), n = 0;
-  for (const char *p = src; (p = strstr(p, find)); p += fl) n++;
-  char *out = malloc(strlen(src) + n * (rl > fl ? rl - fl : 0) + 1);
-  char *o = out; const char *p = src, *q;
-  while ((q = strstr(p, find))) { memcpy(o, p, q - p); o += q - p; memcpy(o, repl, rl); o += rl; p = q + fl; }
-  strcpy(o, p);
-  return out;
-}
-
 static const unsigned char *w_glGetString(unsigned name) {
-  if (name == 0x1F00) return (const unsigned char *)"Imagination Technologies";
-  if (name == 0x1F01) return (const unsigned char *)"PowerVR Rogue G6430";
+  const char *e = getenv("BULLY_GPU");
+  const char *ven = "Qualcomm";
+  const char *ren = "Adreno (TM) 630";
+  if (e && *e) {
+    if (strcmp(e, "mali") == 0) { ven = "ARM"; ren = "Mali-G72"; }
+    else if (strcmp(e, "powervr") == 0) { ven = "Imagination Technologies"; ren = "PowerVR Rogue G6430"; }
+    else if (strcmp(e, "off") == 0) { ven = NULL; ren = NULL; }
+    else { ven = "Qualcomm"; ren = e; }
+  }
+  if (name == 0x1F00 && ven) return (const unsigned char *)ven;
+  if (name == 0x1F01 && ren) return (const unsigned char *)ren;
   static const unsigned char *(*real)(unsigned) = NULL;
   if (!real) real = dlsym(RTLD_DEFAULT, "glGetString");
   const unsigned char *r = real ? real(name) : NULL;
@@ -178,48 +178,26 @@ static const unsigned char *w_glGetString(unsigned name) {
 
 static void (*real_glShaderSource)(unsigned, int, const char *const *, const int *) = NULL;
 static void my_glShaderSource(unsigned sh, int count, const char *const *str, const int *len) {
-  (void)len;
   if (!real_glShaderSource) real_glShaderSource = dlsym(RTLD_DEFAULT, "glShaderSource");
-  size_t total = 1;
-  for (int i = 0; i < count; i++) if (str && str[i]) total += strlen(str[i]);
-  char *cat = malloc(total); cat[0] = 0;
-  for (int i = 0; i < count; i++) if (str && str[i]) strcat(cat, str[i]);
-
-  char *s0 = str_replace_all(cat, "mediump", "highp");
-  free(cat);
-
-  int is_vertex = strstr(s0, "gl_Position") != NULL;
-  char *s1 = s0;
-  if (!is_vertex && strstr(s0, "fadeandcolor")) {
-    s1 = str_replace_all(s0, "< 0.7)", "< 0.04)");
-    free(s0);
-  }
-
-  const char *one = s1;
-  if (real_glShaderSource) real_glShaderSource(sh, 1, &one, NULL);
-  free(s1);
+  if (real_glShaderSource) real_glShaderSource(sh, count, str, len);
 }
 
 static void (*real_glEnable)(unsigned) = NULL;
 static void my_glEnable(unsigned cap) {
   if (!real_glEnable) real_glEnable = dlsym(RTLD_DEFAULT, "glEnable");
-  if (cap == 0x0BD0) return;
   if (real_glEnable) real_glEnable(cap);
 }
 
 static void (*real_glClear)(unsigned) = NULL;
-static void (*real_glDisable)(unsigned) = NULL;
 static void my_glClear(unsigned mask) {
   if (!real_glClear) real_glClear = dlsym(RTLD_DEFAULT, "glClear");
-  if (!real_glDisable) real_glDisable = dlsym(RTLD_DEFAULT, "glDisable");
-  if (real_glDisable) real_glDisable(0x0BD0);
-  if (real_glClear) real_glClear(mask);
+  if (real_glClear) real_glClear(mask | 0x100);
 }
 
 static void (*real_glTexParameteri)(unsigned, unsigned, int) = NULL;
 static void my_glTexParameteri(unsigned target, unsigned pname, int param) {
   if (!real_glTexParameteri) real_glTexParameteri = dlsym(RTLD_DEFAULT, "glTexParameteri");
-  if (pname == 0x813D) return;
+  if (pname == 0x884C) param = 0;
   if (real_glTexParameteri) real_glTexParameteri(target, pname, param);
 }
 

@@ -12,6 +12,7 @@ add_executable(bully
     src/asset_archive.c
     src/egl_shim.c
     src/jni_shim.c
+    src/shadows.c
     src/debug_hooks.c
     src/action_tree_helper.cpp
     src/zip_fs.c
