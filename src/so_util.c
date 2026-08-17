@@ -82,49 +82,6 @@ void hook_x64(uintptr_t addr, uintptr_t dst) {
   }
 }
 
-void so_patch_all_movaps(void) {
-  if (!text_base || text_size == 0)
-    return;
-
-  size_t page_size = sysconf(_SC_PAGESIZE);
-  uintptr_t start = (uintptr_t)text_base & ~(page_size - 1);
-  size_t len = ((uintptr_t)text_base + text_size - start + page_size - 1) &
-  ~(page_size - 1);
-
-  if (mprotect((void *)start, len, PROT_READ | PROT_WRITE | PROT_EXEC) != 0) {
-    perror("mprotect for patching movaps");
-    return;
-  }
-
-  unsigned char *p = (unsigned char *)text_base;
-  unsigned char *end = p + text_size;
-  int patched = 0;
-
-  while (p < end - 3) {
-    if (p[0] == 0x0F && (p[1] == 0x28 || p[1] == 0x29)) {
-      unsigned char modrm = p[2];
-      if ((modrm & 0xC0) != 0xC0) {
-        p[1] ^= 0x38;
-        patched++;
-        p += 3;
-        continue;
-      }
-    } else if (p[0] == 0x66 && p[1] == 0x0F && (p[2] == 0x28 || p[2] == 0x29)) {
-      unsigned char modrm = p[3];
-      if ((modrm & 0xC0) != 0xC0) {
-        p[2] ^= 0x38;
-        patched++;
-        p += 4;
-        continue;
-      }
-    }
-    p++;
-  }
-
-  mprotect((void *)start, len, PROT_READ | PROT_EXEC);
-  printf("[so_util] Patched %d misaligned vector instructions.\n", patched);
-}
-
 void so_finalize(void) {
   size_t ps = sysconf(_SC_PAGESIZE);
   uintptr_t align_text = (uintptr_t)text_base & ~(ps - 1);
@@ -390,30 +347,6 @@ uintptr_t so_find_addr_safe(const char *symbol) {
       return (uintptr_t)load_base + syms[i].st_value;
   }
   return 0;
-}
-
-char *so_find_nearest_symbol(uintptr_t offset, uintptr_t *out_sym_offset) {
-  if (!syms || num_syms <= 0 || !dynstrtab)
-    return NULL;
-  uintptr_t best_diff = (uintptr_t)-1;
-  int best_idx = -1;
-  for (int i = 0; i < num_syms; i++) {
-    if (syms[i].st_shndx == SHN_UNDEF || syms[i].st_value == 0 || syms[i].st_name == 0)
-      continue;
-    uintptr_t val = syms[i].st_value;
-    if (offset >= val) {
-      uintptr_t diff = offset - val;
-      if (diff < best_diff) {
-        best_diff = diff;
-        best_idx = i;
-      }
-    }
-  }
-  if (best_idx >= 0) {
-    if (out_sym_offset) *out_sym_offset = syms[best_idx].st_value;
-    return dynstrtab + syms[best_idx].st_name;
-  }
-  return NULL;
 }
 
 DynLibFunction *so_snapshot_symbols(int *out_count) {

@@ -13,7 +13,6 @@
 #include "jni_shim.h"
 #include "so_util_x64.h"
 #include "util.h"
-#include "zip_fs.h"
 
 extern Module mod_game;
 extern void bully_swap_buffers(void);
@@ -72,97 +71,6 @@ static void check_exit_hotkey(void) {
     SDL_GameControllerGetButton(g_pad, SDL_CONTROLLER_BUTTON_START)) {
     _exit(0);
     }
-}
-
-static int g_gptk = -1;
-static int gptk_mode(void) {
-  if (g_gptk < 0) {
-    const char *e = getenv("BULLY_INPUT");
-    g_gptk = (e && strcmp(e, "gptk") == 0) ? 1 : 0;
-  }
-  return g_gptk;
-}
-static unsigned char g_kb[SDL_NUM_SCANCODES];
-static int g_mxrel, g_myrel;
-
-void gptk_event(void *ev) {
-  SDL_Event *e = (SDL_Event *)ev;
-  if (e->type == SDL_KEYDOWN || e->type == SDL_KEYUP) {
-    int sc = e->key.keysym.scancode;
-    if (sc >= 0 && sc < SDL_NUM_SCANCODES) g_kb[sc] = (e->type == SDL_KEYDOWN);
-  } else if (e->type == SDL_MOUSEMOTION) {
-    g_mxrel += e->motion.xrel; g_myrel += e->motion.yrel;
-  }
-}
-
-static void pump_gptk(void) {
-  static void (*down)(void *, void *, int, int) = NULL;
-  static void (*up)(void *, void *, int, int) = NULL;
-  static void (*axesfn)(void *, void *, int, float, float, float, float, float, float) = NULL;
-  static void (*countfn)(void *, void *, int) = NULL;
-  static int inited = 0, last[20] = {0};
-  static float la[6] = {0}, cam_x = 0, cam_y = 0, sens = 0;
-  if (!inited) {
-    #define GP(n) (void *)so_symbol(&mod_game, "Java_com_rockstargames_oswrapper_GameNative_" n)
-    down = GP("implOnGamepadButtonDown");
-    up = GP("implOnGamepadButtonUp");
-    axesfn = GP("implOnGamepadAxesChanged");
-    countfn = GP("implOnGamepadCountChanged");
-    #undef GP
-    if (countfn) countfn(fake_env, NULL, 1);
-    inited = 1;
-  }
-  if (g_kb[SDL_SCANCODE_ESCAPE] && g_kb[SDL_SCANCODE_RETURN]) _exit(0);
-
-  static const struct { int sc; int game; } kmap[] = {
-    {SDL_SCANCODE_X, 0}, {SDL_SCANCODE_C, 1}, {SDL_SCANCODE_Q, 2}, {SDL_SCANCODE_T, 3},
-    {SDL_SCANCODE_RETURN, 4}, {SDL_SCANCODE_ESCAPE, 5}, {SDL_SCANCODE_U, 6}, {SDL_SCANCODE_I, 7},
-    {SDL_SCANCODE_UP, 8}, {SDL_SCANCODE_DOWN, 9}, {SDL_SCANCODE_LEFT, 10}, {SDL_SCANCODE_RIGHT, 11},
-    {SDL_SCANCODE_N, 12}, {SDL_SCANCODE_M, 13}, {SDL_SCANCODE_F, 14}, {SDL_SCANCODE_G, 15},
-    {SDL_SCANCODE_H, 16}, {SDL_SCANCODE_K, 17}, {SDL_SCANCODE_J, 18}, {SDL_SCANCODE_L, 19},
-  };
-  for (unsigned i = 0; i < sizeof(kmap) / sizeof(kmap[0]); i++) {
-    int g = kmap[i].game, p = g_kb[kmap[i].sc] ? 1 : 0;
-    if (p != last[g]) {
-      if (p) { if (down) down(fake_env, NULL, 0, g); }
-      else { if (up) up(fake_env, NULL, 0, g); }
-      last[g] = p;
-    }
-  }
-  float a[6];
-  if (g_pad) {
-    SDL_GameControllerUpdate();
-    a[0] = SDL_GameControllerGetAxis(g_pad, SDL_CONTROLLER_AXIS_LEFTX) / 32768.0f;
-    a[1] = SDL_GameControllerGetAxis(g_pad, SDL_CONTROLLER_AXIS_LEFTY) / 32768.0f;
-    a[2] = SDL_GameControllerGetAxis(g_pad, SDL_CONTROLLER_AXIS_RIGHTX) / 32768.0f;
-    a[3] = SDL_GameControllerGetAxis(g_pad, SDL_CONTROLLER_AXIS_RIGHTY) / 32768.0f;
-    g_mxrel = g_myrel = 0;
-  } else {
-    a[0] = (g_kb[SDL_SCANCODE_D] ? 1.0f : 0.0f) - (g_kb[SDL_SCANCODE_A] ? 1.0f : 0.0f);
-    a[1] = (g_kb[SDL_SCANCODE_S] ? 1.0f : 0.0f) - (g_kb[SDL_SCANCODE_W] ? 1.0f : 0.0f);
-    if (sens == 0) {
-      const char *e = getenv("BULLY_MOUSE_SENS");
-      sens = e ? atof(e) : 0.09f;
-      if (sens <= 0) sens = 0.09f;
-    }
-    float tx = g_mxrel * sens, ty = g_myrel * sens;
-    g_mxrel = g_myrel = 0;
-    if (tx > 1) tx = 1; if (tx < -1) tx = -1;
-    if (ty > 1) ty = 1; if (ty < -1) ty = -1;
-    cam_x = cam_x * 0.5f + tx * 0.5f;
-    cam_y = cam_y * 0.5f + ty * 0.5f;
-    if (fabsf(cam_x) < 0.02f) cam_x = 0;
-    if (fabsf(cam_y) < 0.02f) cam_y = 0;
-    a[2] = cam_x; a[3] = cam_y;
-  }
-  a[4] = g_kb[SDL_SCANCODE_K] ? 1.0f : 0.0f;
-  a[5] = g_kb[SDL_SCANCODE_L] ? 1.0f : 0.0f;
-  int ch = 0;
-  for (int i = 0; i < 6; i++) if (fabsf(a[i] - la[i]) > 0.02f) { ch = 1; break; }
-  if (ch && axesfn) {
-    axesfn(fake_env, NULL, 0, a[0], a[1], a[2], a[3], a[4], a[5]);
-    for (int i = 0; i < 6; i++) la[i] = a[i];
-  }
 }
 
 static const struct { int sdl; int game; } g_btnmap[] = {
@@ -392,19 +300,7 @@ extern int asset_getc(void *h);
 extern char *asset_gets(char *b, int m, void *h);
 
 static int nv_init(void *a, void *b, void *c) { (void)a; (void)b; (void)c; asset_archive_init(); return 0; }
-static int g_no_crowd_snd = -1;
-static int g_tex_light = -1;
-
-static int ends_with(const char *s, const char *suf) {
-  size_t ls = strlen(s), lf = strlen(suf);
-  return ls >= lf && strcmp(s + ls - lf, suf) == 0;
-}
-
 static void *nv_open(const char *p) {
-  if (g_no_crowd_snd < 0) g_no_crowd_snd = getenv("BULLY_NO_CROWD_SND") ? 1 : 0;
-  if (g_tex_light < 0) g_tex_light = getenv("BULLY_TEX_LIGHT") ? 1 : 0;
-  if (g_no_crowd_snd && p && (strstr(p, "speech") || strstr(p, "ambs_") || strstr(p, "_chatter") || strstr(p, "crowd"))) return NULL;
-  if (g_tex_light && p && (ends_with(p, "_n.tex") || ends_with(p, "_s.tex"))) return NULL;
   return asset_open(p);
 }
 
@@ -609,7 +505,6 @@ void jni_load(void) {
   so_make_text_executable();
   so_flush_caches();
   asset_archive_init();
-  zip_fs_init();
 
   #define R(n) so_symbol(&mod_game, "Java_com_rockstargames_oswrapper_GameNative_" n)
   void (*OnInitialSetup)(void *, void *, void *, void *, void *, void *) = (void *)R("implOnInitialSetup");
@@ -685,7 +580,7 @@ void jni_load(void) {
   Uint64 last_time = SDL_GetPerformanceCounter();
   Uint64 perf_freq = SDL_GetPerformanceFrequency();
 
-  shadows_apply();
+  //shadows_apply();
 
   for (unsigned long f = 0; OnDrawFrame; f++) {
     extern unsigned long g_frame_no;
@@ -696,11 +591,9 @@ void jni_load(void) {
       if (e.type == SDL_QUIT) return;
       if (e.type == SDL_CONTROLLERDEVICEADDED) gamepad_connect(e.cdevice.which);
       else if (e.type == SDL_CONTROLLERDEVICEREMOVED) gamepad_disconnect(e.cdevice.which);
-      if (gptk_mode()) gptk_event(&e);
     }
 
-    if (gptk_mode()) pump_gptk();
-    else pump_gamepad();
+    pump_gamepad();
 
     if (canRender) *canRender = 1;
 
@@ -726,7 +619,7 @@ void jni_load(void) {
       if (OS_SignInComplete) OS_SignInComplete();
     }
 
-    if (elapsed_ms > 2000) shadows_apply();
+    //if (elapsed_ms > 2000) shadows_apply();
 
     Uint64 current_time = SDL_GetPerformanceCounter();
     float dt = (float)(current_time - last_time) / (float)perf_freq;

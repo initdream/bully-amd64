@@ -11,7 +11,6 @@
 
 #include "so_util.h"
 #include "asset_archive.h"
-#include "zip_fs.h"
 #include "jni_shim.h"
 
 #define CXX_SO  "libc++_shared.so"
@@ -128,16 +127,11 @@ int main(int argc, char *argv[]) {
 
   load_module(GAME_SO, GAME_HEAP_MB, comb, comb_n);
 
-  //NOTE: so_patch_all_movaps() is DISABLED by default.
-  if (getenv("BULLY_MOVAPS_PATCH"))
-    so_patch_all_movaps();
-
   extern void debug_hooks_install(void);
   if (getenv("BULLY_DEBUG_THROWS"))
     debug_hooks_install();
 
   asset_archive_init();
-  zip_fs_init();
 
   fprintf(stderr, "=== running jni_load (driver) ===\n");
   jni_load();

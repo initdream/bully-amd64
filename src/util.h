@@ -10,10 +10,6 @@
 
 #include <stdint.h>
 
-int debugPrintf(const char *text, ...);
-
 int ret0(void);
-int ret1(void);
-int retm1(void);
 
 #endif

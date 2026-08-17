@@ -16,7 +16,6 @@
 
 #include "so_util.h"
 #include "jni_shim.h"
-#include "zip_fs.h"
 
 unsigned long g_frame_no = 0;
 
@@ -161,7 +160,7 @@ static void tl_noop(void) {}
 static const unsigned char *w_glGetString(unsigned name) {
   const char *e = getenv("BULLY_GPU");
   const char *ven = "Qualcomm";
-  const char *ren = "Adreno (TM) 630";
+  const char *ren = "Adreno (TM) 740";
   if (e && *e) {
     if (strcmp(e, "mali") == 0) { ven = "ARM"; ren = "Mali-G72"; }
     else if (strcmp(e, "powervr") == 0) { ven = "Imagination Technologies"; ren = "PowerVR Rogue G6430"; }
@@ -176,29 +175,10 @@ static const unsigned char *w_glGetString(unsigned name) {
   return r ? r : (const unsigned char *)"";
 }
 
-static void (*real_glShaderSource)(unsigned, int, const char *const *, const int *) = NULL;
-static void my_glShaderSource(unsigned sh, int count, const char *const *str, const int *len) {
-  if (!real_glShaderSource) real_glShaderSource = dlsym(RTLD_DEFAULT, "glShaderSource");
-  if (real_glShaderSource) real_glShaderSource(sh, count, str, len);
-}
-
-static void (*real_glEnable)(unsigned) = NULL;
-static void my_glEnable(unsigned cap) {
-  if (!real_glEnable) real_glEnable = dlsym(RTLD_DEFAULT, "glEnable");
-  if (real_glEnable) real_glEnable(cap);
-}
-
 static void (*real_glClear)(unsigned) = NULL;
 static void my_glClear(unsigned mask) {
   if (!real_glClear) real_glClear = dlsym(RTLD_DEFAULT, "glClear");
   if (real_glClear) real_glClear(mask | 0x100);
-}
-
-static void (*real_glTexParameteri)(unsigned, unsigned, int) = NULL;
-static void my_glTexParameteri(unsigned target, unsigned pname, int param) {
-  if (!real_glTexParameteri) real_glTexParameteri = dlsym(RTLD_DEFAULT, "glTexParameteri");
-  if (pname == 0x884C) param = 0;
-  if (real_glTexParameteri) real_glTexParameteri(target, pname, param);
 }
 
 static void (*real_glTexImage2D)(unsigned, int, int, int, int, int, unsigned, unsigned, const void *) = NULL;
@@ -270,10 +250,7 @@ DynLibFunction bully_stub_table[] = {
   {"AAsset_getRemainingLength64", (uintptr_t)aa_getRemainingLength64},
   {"AAsset_close", (uintptr_t)aa_close},
   {"glGetString", (uintptr_t)w_glGetString},
-  {"glShaderSource", (uintptr_t)my_glShaderSource},
-  {"glTexParameteri", (uintptr_t)my_glTexParameteri},
   {"glTexImage2D", (uintptr_t)my_glTexImage2D},
-  {"glEnable", (uintptr_t)my_glEnable},
   {"glClear", (uintptr_t)my_glClear},
   {"fopen", (uintptr_t)w_fopen},
   {"_ZTH7gString", (uintptr_t)tl_noop},

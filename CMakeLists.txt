@@ -14,10 +14,7 @@ add_executable(bully
     src/jni_shim.c
     src/shadows.c
     src/debug_hooks.c
-    src/action_tree_helper.cpp
-    src/zip_fs.c
     src/util.c
-    src/error.c
 )
 
 target_include_directories(bully PRIVATE src)

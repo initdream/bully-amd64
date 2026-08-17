@@ -38,7 +38,6 @@ extern size_t tls_init_size, tls_total_size, tls_align;
 void hook_x64(uintptr_t addr, uintptr_t dst);
 void so_make_text_writable(void);
 void so_make_text_executable(void);
-void so_patch_all_movaps(void);
 void so_flush_caches(void);
 void so_override_imports(const ImportOverride *ovr, int n);
 int so_load(const char *filename, void *base, size_t max_size);
@@ -47,7 +46,6 @@ int so_resolve(DynLibFunction *funcs, int num_funcs, int taint_missing_imports);
 void so_execute_init_array(void);
 uintptr_t so_find_addr(const char *symbol);
 uintptr_t so_find_addr_safe(const char *symbol);
-char *so_find_nearest_symbol(uintptr_t offset, uintptr_t *out_sym_offset);
 void so_finalize(void);
 
 DynLibFunction *so_snapshot_symbols(int *out_count);

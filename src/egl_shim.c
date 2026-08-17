@@ -47,14 +47,16 @@ int bully_init_gl(void) {
 
   int msaa = 0;
   { const char *e = getenv("BULLY_MSAA"); if (e) msaa = atoi(e); }
+  int gles_maj = 3, gles_min = 0;
+  // { const char *e = getenv("BULLY_GLES"); if (e && atoi(e) < 3) { gles_maj = 2; gles_min = 0; } }
   static const int alpha_try[] = {8, 0};
   int msaa_try[2] = {0, 0}, nmsaa = 1;
   if (msaa > 0) { msaa_try[0] = msaa; msaa_try[1] = 0; nmsaa = 2; }
   for (int j = 0; j < nmsaa && !g_window; j++)
     for (int i = 0; i < 2 && !g_window; i++) {
       SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
-      SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
-      SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+      SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, gles_maj);
+      SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, gles_min);
       SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8);
       SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8);
       SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
@@ -79,11 +81,18 @@ int bully_init_gl(void) {
           windowed ? "windowed" : "fullscreen-desktop", g_w, g_h,
           drv ? drv : "?", g_is_kmsdrm);
 
-  g_gl_context = SDL_GL_CreateContext(g_window);
-  if (!g_gl_context) {
-    fprintf(stderr, "[sdl] GL_CreateContext: %s\n", SDL_GetError());
-    return 0;
+  int ctx_maj = gles_maj, ctx_min = gles_min;
+  for (int attempt = 0; attempt < 2 && !g_gl_context; attempt++) {
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, ctx_maj);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, ctx_min);
+    g_gl_context = SDL_GL_CreateContext(g_window);
+    if (!g_gl_context) {
+      fprintf(stderr, "[sdl] GL_CreateContext (ES %d.%d): %s\n", ctx_maj, ctx_min, SDL_GetError());
+      ctx_maj = 2; ctx_min = 0;
+    }
   }
+  if (!g_gl_context) return 0;
   SDL_GL_MakeCurrent(g_window, g_gl_context);
 
   glEnable(GL_DEPTH_TEST);
