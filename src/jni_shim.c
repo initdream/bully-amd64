@@ -99,7 +99,7 @@ static void gamepad_reset(void) {
   memset(g_pump_la, 0, sizeof(g_pump_la));
 }
 
-static void gamepad_connect(int which) {
+void jni_gamepad_connect(int which) {
   if (!SDL_IsGameController(which) || g_pad) return;
   g_pad = SDL_GameControllerOpen(which);
   if (!g_pad) return;
@@ -108,16 +108,16 @@ static void gamepad_connect(int which) {
   gamepad_reset();
 }
 
-static void gamepad_disconnect(SDL_JoystickID instance) {
+void jni_gamepad_disconnect(int instance) {
   if (!g_pad) return;
-  if (SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(g_pad)) != instance) return;
+  if (SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(g_pad)) != (SDL_JoystickID)instance) return;
   SDL_GameControllerClose(g_pad);
   g_pad = NULL;
   gamepad_reset();
   fprintf(stderr, "[pad] disconnected\n");
 }
 
-static void pump_gamepad(void) {
+void jni_pump_gamepad(void) {
   if (!g_pad) return;
   if (!g_pump_inited) {
     #define GP(n) (void *)so_symbol(&mod_game, "Java_com_rockstargames_oswrapper_GameNative_" n)
@@ -274,7 +274,7 @@ void jni_init_input(void) {
   int n = SDL_NumJoysticks();
   for (int i = 0; i < n; i++) {
     if (SDL_IsGameController(i) && !g_pad) {
-      gamepad_connect(i);
+      jni_gamepad_connect(i);
     }
   }
   if (!g_pad && n > 0) {
@@ -284,7 +284,7 @@ void jni_init_input(void) {
       "leftshoulder:b4,rightshoulder:b5,"
       "dpup:h0.1,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,"
       "leftx:a0,lefty:a1,rightx:a2,righty:a3,platform:Linux,");
-    gamepad_connect(0);
+    jni_gamepad_connect(0);
   }
 }
 
@@ -476,6 +476,54 @@ static void *my_DecodeTreeStub(void *thiz) {
   return (void *)1;
 }
 
+static void (*g_on_draw_frame)(void *, void *, float) = NULL;
+static volatile uint8_t *g_can_render = NULL;
+static volatile uint8_t *g_is_init = NULL;
+static volatile uint8_t *g_suspended = NULL;
+static void (*g_os_state_changed)(int) = NULL;
+static void (*g_os_initial_complete)(void) = NULL;
+static void (*g_os_gate_complete)(int, int) = NULL;
+static void (*g_os_signin_complete)(void) = NULL;
+static void (*g_os_app_event)(int, void *) = NULL;
+static void (*g_rk_setup)(void *, void *, void *, void *) = NULL;
+
+void jni_mark_can_render(void) {
+  if (g_can_render) *g_can_render = 1;
+}
+
+void jni_update_rockstar(void) {
+  static int rk_fired = 0, rk_signin = 0;
+  static Uint32 start_ticks = 0;
+  if (!start_ticks) start_ticks = SDL_GetTicks();
+  Uint32 elapsed_ms = SDL_GetTicks() - start_ticks;
+
+  if (!rk_fired && (g_rk_pending_initial || g_rk_pending_gate) && elapsed_ms > 450) {
+    rk_fired = 1;
+    int gt = g_rk_pending_gate ? g_rk_pending_gate_type : 0;
+    if (g_os_state_changed) g_os_state_changed(0);
+    if (g_os_initial_complete) g_os_initial_complete();
+    if (g_os_gate_complete) g_os_gate_complete(gt, 1);
+    if (g_os_app_event) g_os_app_event(9, NULL);
+    if (g_rk_setup) g_rk_setup(fake_env, NULL, (void *)"pc_user", (void *)"pc_ticket");
+    if (g_can_render) *g_can_render = 1;
+    if (g_suspended) *g_suspended = 0;
+    if (g_is_init) *g_is_init = 1;
+    g_rk_pending_initial = g_rk_pending_gate = 0;
+    rk_signin = 1;
+  }
+
+  if (rk_signin && elapsed_ms > 700) {
+    rk_signin = 0;
+    if (g_os_signin_complete) g_os_signin_complete();
+  }
+}
+
+int jni_draw_frame(void *env, float dt) {
+  if (!g_on_draw_frame) return 0;
+  g_on_draw_frame(env, NULL, dt);
+  return 1;
+}
+
 void jni_load(void) {
   build_env();
   for (unsigned i = 0; i < sizeof(fake_vm) / sizeof(uintptr_t); i++)
@@ -565,68 +613,14 @@ void jni_load(void) {
   if (OnResume) OnResume(fake_env, NULL);
   start_async_file_worker();
 
-  void (*OS_StateChanged)(int) = (void *)so_symbol(&mod_game, "_Z25OS_OnRockstarStateChangedb");
-  void (*OS_InitialComplete)(void) = (void *)so_symbol(&mod_game, "_Z28OS_OnRockstarInitialCompletev");
-  void (*OS_GateComplete)(int, int) = (void *)so_symbol(&mod_game, "_Z25OS_OnRockstarGateCompleteib");
-  void (*OS_SignInComplete)(void) = (void *)so_symbol(&mod_game, "_Z27OS_OnRockstarSignInCompletev");
-  void (*OS_AppEvent)(int, void *) = (void *)so_symbol(&mod_game, "_Z19OS_ApplicationEvent11OSEventTypePv");
-  void (*OnRkSetup)(void *, void *, void *, void *) = (void *)so_symbol(&mod_game, "Java_com_rockstargames_oswrapper_GameNative_implOnRockstarSetup");
-
-  extern volatile int g_rk_pending_initial, g_rk_pending_gate, g_rk_pending_gate_type;
-  int rk_fired = 0, rk_signin = 0;
-
-  Uint32 start_ticks = SDL_GetTicks();
-
-  Uint64 last_time = SDL_GetPerformanceCounter();
-  Uint64 perf_freq = SDL_GetPerformanceFrequency();
-
-  //shadows_apply();
-
-  for (unsigned long f = 0; OnDrawFrame; f++) {
-    extern unsigned long g_frame_no;
-    g_frame_no = f;
-
-    SDL_Event e;
-    while (SDL_PollEvent(&e)) {
-      if (e.type == SDL_QUIT) return;
-      if (e.type == SDL_CONTROLLERDEVICEADDED) gamepad_connect(e.cdevice.which);
-      else if (e.type == SDL_CONTROLLERDEVICEREMOVED) gamepad_disconnect(e.cdevice.which);
-    }
-
-    pump_gamepad();
-
-    if (canRender) *canRender = 1;
-
-    Uint32 elapsed_ms = SDL_GetTicks() - start_ticks;
-
-    if (!rk_fired && (g_rk_pending_initial || g_rk_pending_gate) && elapsed_ms > 450) {
-      rk_fired = 1;
-      int gt = g_rk_pending_gate ? g_rk_pending_gate_type : 0;
-      if (OS_StateChanged) OS_StateChanged(0);
-      if (OS_InitialComplete) OS_InitialComplete();
-      if (OS_GateComplete) OS_GateComplete(gt, 1);
-      if (OS_AppEvent) OS_AppEvent(9, NULL);
-      if (OnRkSetup) OnRkSetup(fake_env, NULL, (void *)"pc_user", (void *)"pc_ticket");
-      if (canRender) *canRender = 1;
-      if (suspended) *suspended = 0;
-      if (isInit) *isInit = 1;
-      g_rk_pending_initial = g_rk_pending_gate = 0;
-      rk_signin = 1;
-    }
-
-    if (rk_signin && elapsed_ms > 700) {
-      rk_signin = 0;
-      if (OS_SignInComplete) OS_SignInComplete();
-    }
-
-    //if (elapsed_ms > 2000) shadows_apply();
-
-    Uint64 current_time = SDL_GetPerformanceCounter();
-    float dt = (float)(current_time - last_time) / (float)perf_freq;
-    last_time = current_time;
-
-    if (dt <= 0.0f) dt = 1.0f / 30.0f;
-
-    OnDrawFrame(fake_env, NULL, dt);
-  }
+  g_on_draw_frame = OnDrawFrame;
+  g_can_render = canRender;
+  g_is_init = isInit;
+  g_suspended = suspended;
+  g_os_state_changed = (void (*)(int))so_symbol(&mod_game, "_Z25OS_OnRockstarStateChangedb");
+  g_os_initial_complete = (void (*)(void))so_symbol(&mod_game, "_Z28OS_OnRockstarInitialCompletev");
+  g_os_gate_complete = (void (*)(int, int))so_symbol(&mod_game, "_Z25OS_OnRockstarGateCompleteib");
+  g_os_signin_complete = (void (*)(void))so_symbol(&mod_game, "_Z27OS_OnRockstarSignInCompletev");
+  g_os_app_event = (void (*)(int, void *))so_symbol(&mod_game, "_Z19OS_ApplicationEvent11OSEventTypePv");
+  g_rk_setup = (void (*)(void *, void *, void *, void *))so_symbol(&mod_game, "Java_com_rockstargames_oswrapper_GameNative_implOnRockstarSetup");
 }

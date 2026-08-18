@@ -5,9 +5,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <ucontext.h>
 #include <unistd.h>
 #include <execinfo.h>
+
+#include <SDL2/SDL.h>
 
 #include "so_util.h"
 #include "asset_archive.h"
@@ -20,12 +23,10 @@
 
 int mod_game, mod_cxx;
 
-extern DynLibFunction bully_stub_table[];
-extern const int bully_stub_count;
-extern DynLibFunction revc_pthread_table[];
-extern const int revc_pthread_count;
+extern DynLibFunction dynlib_functions[];
+extern const int dynlib_functions_count;
 extern void bully_imports_init(void);
-extern void jni_load(void);
+extern unsigned long g_frame_no;
 
 static void crash_handler(int sig, siginfo_t *info, void *uc) {
   uintptr_t fault = (uintptr_t)info->si_addr;
@@ -103,6 +104,67 @@ static void load_module(const char *name, int heap_mb, DynLibFunction *tbl, int 
   so_execute_init_array();
 }
 
+static void check_data(void) {
+  struct stat st;
+  if (stat(GAME_SO, &st) < 0) {
+    fprintf(stderr, "FATAL: Missing %s\n", GAME_SO);
+    exit(1);
+  }
+  if (stat(CXX_SO, &st) < 0) {
+    fprintf(stderr, "FATAL: Missing %s\n", CXX_SO);
+    exit(1);
+  }
+
+  const char *need[] = {
+    "assets/data_0.zip", "assets/data_0.zip.idx",
+    "assets/data_1.zip", "assets/data_1.zip.idx",
+    "assets/data_2.zip", "assets/data_2.zip.idx",
+    "assets/data_3.zip", "assets/data_3.zip.idx",
+    "assets/data_4.zip", "assets/data_4.zip.idx",
+    NULL,
+  };
+  int missing = 0;
+  for (int i = 0; need[i]; i++) {
+    if (stat(need[i], &st) < 0) {
+      fprintf(stderr, "ERROR: Required data file '%s' not found.\n", need[i]);
+      missing = 1;
+    }
+  }
+  if (missing) {
+    fprintf(stderr, "FATAL: Missing game data files in the 'assets/' directory.\n");
+    exit(1);
+  }
+}
+
+static void run_game_loop(void) {
+  void *env = NVThreadGetCurrentJNIEnv();
+  Uint64 last_time = SDL_GetPerformanceCounter();
+  Uint64 perf_freq = SDL_GetPerformanceFrequency();
+
+  for (unsigned long f = 0; ; f++) {
+    g_frame_no = f;
+
+    SDL_Event e;
+    while (SDL_PollEvent(&e)) {
+      if (e.type == SDL_QUIT) return;
+      if (e.type == SDL_CONTROLLERDEVICEADDED) jni_gamepad_connect(e.cdevice.which);
+      else if (e.type == SDL_CONTROLLERDEVICEREMOVED) jni_gamepad_disconnect(e.cdevice.which);
+    }
+
+    jni_pump_gamepad();
+    jni_mark_can_render();
+    jni_update_rockstar();
+
+    Uint64 current_time = SDL_GetPerformanceCounter();
+    float dt = (float)(current_time - last_time) / (float)perf_freq;
+    last_time = current_time;
+
+    if (dt <= 0.0f) dt = 1.0f / 30.0f;
+
+    if (!jni_draw_frame(env, dt)) return;
+  }
+}
+
 int main(int argc, char *argv[]) {
   (void)argc; (void)argv;
   install_crash_handler();
@@ -110,22 +172,23 @@ int main(int argc, char *argv[]) {
 
   bully_imports_init();
   preload_device_libs();
+  check_data();
 
-  int g_base_n = bully_stub_count + revc_pthread_count;
-  DynLibFunction *g_base = malloc(sizeof(DynLibFunction) * g_base_n);
-  memcpy(g_base, bully_stub_table, sizeof(DynLibFunction) * bully_stub_count);
-  memcpy(g_base + bully_stub_count, revc_pthread_table, sizeof(DynLibFunction) * revc_pthread_count);
-
-  load_module(CXX_SO, CXX_HEAP_MB, g_base, g_base_n);
+  load_module(CXX_SO, CXX_HEAP_MB, dynlib_functions, dynlib_functions_count);
   int cxx_n = 0;
   DynLibFunction *cxx_tbl = so_snapshot_symbols(&cxx_n);
 
-  int comb_n = g_base_n + cxx_n;
+  int comb_n = dynlib_functions_count + cxx_n;
   DynLibFunction *comb = malloc(sizeof(DynLibFunction) * comb_n);
-  memcpy(comb, g_base, sizeof(DynLibFunction) * g_base_n);
-  memcpy(comb + g_base_n, cxx_tbl, sizeof(DynLibFunction) * cxx_n);
+  if (!comb) {
+    fprintf(stderr, "out of memory building combined import table\n");
+    exit(1);
+  }
+  memcpy(comb, dynlib_functions, sizeof(DynLibFunction) * dynlib_functions_count);
+  memcpy(comb + dynlib_functions_count, cxx_tbl, sizeof(DynLibFunction) * cxx_n);
 
   load_module(GAME_SO, GAME_HEAP_MB, comb, comb_n);
+  free(comb);
 
   extern void debug_hooks_install(void);
   if (getenv("BULLY_DEBUG_THROWS"))
@@ -135,6 +198,8 @@ int main(int argc, char *argv[]) {
 
   fprintf(stderr, "=== running jni_load (driver) ===\n");
   jni_load();
+
+  run_game_loop();
 
   return 0;
 }

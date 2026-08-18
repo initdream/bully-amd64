@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <SDL2/SDL.h>
@@ -217,7 +218,32 @@ static unsigned my_eglSwapBuffers(void *dpy, void *surf) {
   return real_eglSwapBuffers ? real_eglSwapBuffers(dpy, surf) : 1;
 }
 
-DynLibFunction bully_stub_table[] = {
+extern int b_pthread_attr_init(void *a);
+extern int b_pthread_attr_destroy(void *a);
+extern int b_pthread_attr_setstacksize(void *a, size_t s);
+extern int b_pthread_attr_setdetachstate(void *a, int s);
+extern int b_pthread_create(pthread_t *thread, const void *attr,
+                            void *(*start_routine)(void *), void *arg);
+extern int b_mutexattr_init(void *a);
+extern int b_mutexattr_destroy(void *a);
+extern int b_mutexattr_settype(void *a, int type);
+extern int b_mutex_init(void *m, const void *attr);
+extern int b_mutex_lock(void *m);
+extern int b_mutex_unlock(void *m);
+extern int b_mutex_trylock(void *m);
+extern int b_mutex_destroy(void *m);
+extern int b_cond_init(void *c, const void *attr);
+extern int b_cond_wait(void *c, void *m);
+extern int b_cond_timedwait(void *c, void *m, const struct timespec *t);
+extern int b_cond_signal(void *c);
+extern int b_cond_broadcast(void *c);
+extern int b_cond_destroy(void *c);
+extern int b_rwlock_rdlock(void *r);
+extern int b_rwlock_wrlock(void *r);
+extern int b_rwlock_unlock(void *r);
+extern int b_once(void *once_ctl, void (*init)(void));
+
+DynLibFunction dynlib_functions[] = {
   {"__sF", (uintptr_t)bionic_sF},
   {"fprintf", (uintptr_t)w_fprintf},
   {"vfprintf", (uintptr_t)w_vfprintf},
@@ -257,5 +283,29 @@ DynLibFunction bully_stub_table[] = {
   {"_ZTH8gString2", (uintptr_t)tl_noop},
   {"_ZTHN10ALCcontext13sLocalContextE", (uintptr_t)tl_noop},
   {"_Z24NVThreadGetCurrentJNIEnvv", (uintptr_t)NVThreadGetCurrentJNIEnv},
+
+  {"pthread_mutexattr_init", (uintptr_t)&b_mutexattr_init},
+  {"pthread_mutexattr_destroy", (uintptr_t)&b_mutexattr_destroy},
+  {"pthread_mutexattr_settype", (uintptr_t)&b_mutexattr_settype},
+  {"pthread_mutex_init", (uintptr_t)&b_mutex_init},
+  {"pthread_mutex_lock", (uintptr_t)&b_mutex_lock},
+  {"pthread_mutex_unlock", (uintptr_t)&b_mutex_unlock},
+  {"pthread_mutex_trylock", (uintptr_t)&b_mutex_trylock},
+  {"pthread_mutex_destroy", (uintptr_t)&b_mutex_destroy},
+  {"pthread_cond_init", (uintptr_t)&b_cond_init},
+  {"pthread_cond_wait", (uintptr_t)&b_cond_wait},
+  {"pthread_cond_timedwait", (uintptr_t)&b_cond_timedwait},
+  {"pthread_cond_signal", (uintptr_t)&b_cond_signal},
+  {"pthread_cond_broadcast", (uintptr_t)&b_cond_broadcast},
+  {"pthread_cond_destroy", (uintptr_t)&b_cond_destroy},
+  {"pthread_rwlock_rdlock", (uintptr_t)&b_rwlock_rdlock},
+  {"pthread_rwlock_wrlock", (uintptr_t)&b_rwlock_wrlock},
+  {"pthread_rwlock_unlock", (uintptr_t)&b_rwlock_unlock},
+  {"pthread_once", (uintptr_t)&b_once},
+  {"pthread_attr_init", (uintptr_t)&b_pthread_attr_init},
+  {"pthread_attr_destroy", (uintptr_t)&b_pthread_attr_destroy},
+  {"pthread_attr_setstacksize", (uintptr_t)&b_pthread_attr_setstacksize},
+  {"pthread_attr_setdetachstate", (uintptr_t)&b_pthread_attr_setdetachstate},
+  {"pthread_create", (uintptr_t)&b_pthread_create},
 };
-const int bully_stub_count = sizeof(bully_stub_table) / sizeof(bully_stub_table[0]);
+const int dynlib_functions_count = sizeof(dynlib_functions) / sizeof(dynlib_functions[0]);
