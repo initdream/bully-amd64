@@ -176,26 +176,26 @@ static const unsigned char *w_glGetString(unsigned name) {
   return r ? r : (const unsigned char *)"";
 }
 
-static void (*real_glClear)(unsigned) = NULL;
-static void my_glClear(unsigned mask) {
-  if (!real_glClear) real_glClear = dlsym(RTLD_DEFAULT, "glClear");
-  if (real_glClear) real_glClear(mask | 0x100);
-}
+// static void (*real_glClear)(unsigned) = NULL;
+// static void my_glClear(unsigned mask) {
+//   if (!real_glClear) real_glClear = dlsym(RTLD_DEFAULT, "glClear");
+//   if (real_glClear) real_glClear(mask | 0x100);
+// }
 
-static void (*real_glTexImage2D)(unsigned, int, int, int, int, int, unsigned, unsigned, const void *) = NULL;
-static void my_glTexImage2D(unsigned tgt, int lvl, int ifmt, int w, int h, int bord, unsigned fmt, unsigned type, const void *px) {
-  if (!real_glTexImage2D) real_glTexImage2D = dlsym(RTLD_DEFAULT, "glTexImage2D");
-
-  if (ifmt == 0x8058) ifmt = 0x1908;
-  else if (ifmt == 0x8051) ifmt = 0x1907;
-  if (!px && (type == 0x8363 || type == 0x8033 || type == 0x8034)) {
-    type = 0x1401;
-    fmt = 0x1908;
-    ifmt = 0x1908;
-  }
-
-  if (real_glTexImage2D) real_glTexImage2D(tgt, lvl, ifmt, w, h, bord, fmt, type, px);
-}
+// static void (*real_glTexImage2D)(unsigned, int, int, int, int, int, unsigned, unsigned, const void *) = NULL;
+// static void my_glTexImage2D(unsigned tgt, int lvl, int ifmt, int w, int h, int bord, unsigned fmt, unsigned type, const void *px) {
+//   if (!real_glTexImage2D) real_glTexImage2D = dlsym(RTLD_DEFAULT, "glTexImage2D");
+//
+//   if (ifmt == 0x8058) ifmt = 0x1908;
+//   else if (ifmt == 0x8051) ifmt = 0x1907;
+//   if (!px && (type == 0x8363 || type == 0x8033 || type == 0x8034)) {
+//     type = 0x1401;
+//     fmt = 0x1908;
+//     ifmt = 0x1908;
+//   }
+//
+//   if (real_glTexImage2D) real_glTexImage2D(tgt, lvl, ifmt, w, h, bord, fmt, type, px);
+// }
 
 void bully_imports_init(void) {
   ctype_init();
@@ -210,12 +210,10 @@ static unsigned my_eglSwapInterval(void *dpy, int interval) {
 }
 
 extern void bully_swap_buffers(void);
-extern int  bully_is_kmsdrm(void);
-static unsigned (*real_eglSwapBuffers)(void*, void*) = NULL;
 static unsigned my_eglSwapBuffers(void *dpy, void *surf) {
-  if (bully_is_kmsdrm()) { bully_swap_buffers(); return 1; }
-  if (!real_eglSwapBuffers) real_eglSwapBuffers = dlsym(RTLD_DEFAULT, "eglSwapBuffers");
-  return real_eglSwapBuffers ? real_eglSwapBuffers(dpy, surf) : 1;
+  (void)dpy; (void)surf;
+  bully_swap_buffers();
+  return 1;
 }
 
 extern int b_pthread_attr_init(void *a);
@@ -276,8 +274,8 @@ DynLibFunction dynlib_functions[] = {
   {"AAsset_getRemainingLength64", (uintptr_t)aa_getRemainingLength64},
   {"AAsset_close", (uintptr_t)aa_close},
   {"glGetString", (uintptr_t)w_glGetString},
-  {"glTexImage2D", (uintptr_t)my_glTexImage2D},
-  {"glClear", (uintptr_t)my_glClear},
+  // {"glTexImage2D", (uintptr_t)my_glTexImage2D},
+  // {"glClear", (uintptr_t)my_glClear},
   {"fopen", (uintptr_t)w_fopen},
   {"_ZTH7gString", (uintptr_t)tl_noop},
   {"_ZTH8gString2", (uintptr_t)tl_noop},

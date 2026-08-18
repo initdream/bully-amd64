@@ -58,13 +58,6 @@ static char *getAppLocalValue(char *key) {
   return NULL;
 }
 static int hasAppLocalValue(char *key) { return (key && strcmp(key, "STORAGE_ROOT") == 0) ? 1 : 0; }
-static void setAppLocalValue(char *k, char *v) { (void)k; (void)v; }
-static char *getParameter(char *key) { (void)key; return NULL; }
-static char *FileGetArchiveName(int type) {
-  if (type == 1) return (char *)"main.obb";
-  if (type == 2) return (char *)"patch.obb";
-  return NULL;
-}
 
 static void check_exit_hotkey(void) {
   if (g_pad && SDL_GameControllerGetButton(g_pad, SDL_CONTROLLER_BUTTON_BACK) &&
@@ -190,11 +183,6 @@ static int CallBooleanMethodV(void *e, void *o, int id, va_list a) {
   return 0;
 }
 
-static float CallFloatMethodV(void *e, void *o, int id, va_list a) {
-  (void)e; (void)o; (void)id; (void)a;
-  return 0.0f;
-}
-
 static int CallIntMethodV(void *e, void *o, int id, va_list a) {
   (void)e; (void)o;
   switch (id) {
@@ -209,8 +197,8 @@ static void *CallObjectMethodV(void *e, void *o, int id, va_list a) {
   (void)e; (void)o;
   switch (id) {
     case GET_APP_LOCAL_VALUE: { char *r = getAppLocalValue(va_arg(a, char *)); return r ? r : (void *)""; }
-    case GET_PARAMETER: { char *r = getParameter(va_arg(a, char *)); return r ? r : (void *)""; }
-    case FILE_GET_ARCHIVE_NAME: { char *r = FileGetArchiveName(va_arg(a, int)); return r ? r : (void *)""; }
+    case GET_PARAMETER: { (void)va_arg(a, char *); return (void *)""; }
+    case FILE_GET_ARCHIVE_NAME: { (void)va_arg(a, int); return (void *)""; }
   }
   return (void *)"";
 }
@@ -218,9 +206,7 @@ static void *CallObjectMethodV(void *e, void *o, int id, va_list a) {
 volatile int g_rk_pending_initial = 0, g_rk_pending_gate = 0, g_rk_pending_gate_type = 0;
 static void CallVoidMethodV(void *e, void *o, int id, va_list a) {
   (void)e; (void)o;
-  if (id == SET_APP_LOCAL_VALUE) {
-    char *k = va_arg(a, char *); char *v = va_arg(a, char *); setAppLocalValue(k, v);
-  } else if (id == ROCKSTAR_SHOW_INITIAL) {
+  if (id == ROCKSTAR_SHOW_INITIAL) {
     g_rk_pending_initial = 1;
   } else if (id == ROCKSTAR_SHOW_GATE) {
     g_rk_pending_gate_type = va_arg(a, int); g_rk_pending_gate = 1;
@@ -237,7 +223,6 @@ void *NVThreadGetCurrentJNIEnv(void) { return fake_env; }
 static void *CallObjectMethod(void *e, void *o, int id, ...) { va_list a; va_start(a, id); void *r = CallObjectMethodV(e, o, id, a); va_end(a); return r; }
 static int CallBooleanMethod(void *e, void *o, int id, ...) { va_list a; va_start(a, id); int r = CallBooleanMethodV(e, o, id, a); va_end(a); return r; }
 static int CallIntMethod(void *e, void *o, int id, ...) { va_list a; va_start(a, id); int r = CallIntMethodV(e, o, id, a); va_end(a); return r; }
-static float CallFloatMethod(void *e, void *o, int id, ...) { va_list a; va_start(a, id); float r = CallFloatMethodV(e, o, id, a); va_end(a); return r; }
 static void CallVoidMethod(void *e, void *o, int id, ...) { va_list a; va_start(a, id); CallVoidMethodV(e, o, id, a); va_end(a); }
 
 static int GetEnv(void *vm, void **env, int v) { (void)vm; (void)v; *env = fake_env; return 0; }
@@ -260,8 +245,6 @@ static void build_env(void) {
   SET(0x130, CallBooleanMethodV);
   SET(0x188, CallIntMethod);
   SET(0x190, CallIntMethodV);
-  SET(0x1B8, CallFloatMethod);
-  SET(0x1C0, CallFloatMethodV);
   SET(0x1E8, CallVoidMethod);
   SET(0x1F0, CallVoidMethodV);
   SET(0x538, NewStringUTF);
@@ -325,47 +308,20 @@ static void hook_egl(void) {
   hook_x64(so_symbol(&mod_game, "_Z22OS_ThreadUnmakeCurrentv"), (uintptr_t)os_thread_unmakecurrent);
 }
 
-static int os_screen_w(void) { return bully_screen_w(); }
-static int os_screen_h(void) { return bully_screen_h(); }
 static int os_can_render(void) { return 1; }
 static int os_is_suspended(void) { return 0; }
 static void hook_screen(void) {
-  hook_x64(so_symbol(&mod_game, "_Z17OS_ScreenGetWidthv"), (uintptr_t)os_screen_w);
-  hook_x64(so_symbol(&mod_game, "_Z18OS_ScreenGetHeightv"), (uintptr_t)os_screen_h);
+  hook_x64(so_symbol(&mod_game, "_Z17OS_ScreenGetWidthv"), (uintptr_t)bully_screen_w);
+  hook_x64(so_symbol(&mod_game, "_Z18OS_ScreenGetHeightv"), (uintptr_t)bully_screen_h);
   hook_x64(so_symbol(&mod_game, "_Z16OS_CanGameRenderv"), (uintptr_t)os_can_render);
   hook_x64(so_symbol(&mod_game, "_Z18OS_IsGameSuspendedv"), (uintptr_t)os_is_suspended);
 }
 
 static int my_cxa_guard_acquire(char *g) { return g && *g == 0; }
 static void my_cxa_guard_release(char *g) { if (g) *g = 1; }
-static void my_cxa_guard_abort(char *g) { (void)g; }
 static void hook_cxa(void) {
   hook_x64(so_symbol(&mod_game, "__cxa_guard_acquire"), (uintptr_t)my_cxa_guard_acquire);
   hook_x64(so_symbol(&mod_game, "__cxa_guard_release"), (uintptr_t)my_cxa_guard_release);
-  hook_x64(so_symbol(&mod_game, "__cxa_guard_abort"), (uintptr_t)my_cxa_guard_abort);
-}
-
-static void (*g_AND_FileUpdated)(double) = NULL;
-static volatile uintptr_t *g_first_async = NULL;
-static void *async_file_worker(void *a) {
-  (void)a;
-  for (;;) {
-    if (g_AND_FileUpdated && g_first_async && __atomic_load_n(g_first_async, __ATOMIC_ACQUIRE))
-      g_AND_FileUpdated(0.002);
-    else
-      usleep(2000);
-  }
-  return NULL;
-}
-static void start_async_file_worker(void) {
-  g_AND_FileUpdated = (void (*)(double))so_symbol(&mod_game, "_Z14AND_FileUpdated");
-  g_first_async = (volatile uintptr_t *)so_symbol(&mod_game, "_ZN11AndroidFile14firstAsyncFileE");
-  if (g_AND_FileUpdated && g_first_async) {
-    pthread_t t;
-    if (pthread_create(&t, NULL, async_file_worker, NULL) == 0) {
-      pthread_detach(t);
-    }
-  }
 }
 
 typedef struct {
@@ -435,34 +391,6 @@ static void hook_nvapk(void) {
   HK("_Z9NvAPKGetcPv", nv_getc);
   HK("_Z9NvAPKGetsPciPv", nv_gets);
   #undef HK
-}
-
-static void hook_x86_jmp(uintptr_t addr, uintptr_t dst) {
-  size_t page_size = sysconf(_SC_PAGESIZE);
-  uintptr_t page_start = addr & ~(page_size - 1);
-  size_t len = ((addr + 14) - page_start + page_size - 1) & ~(page_size - 1);
-
-  mprotect((void *)page_start, len, PROT_READ | PROT_WRITE | PROT_EXEC);
-
-  uint8_t *hook = (uint8_t *)addr;
-  int64_t diff = (int64_t)dst - (int64_t)(addr + 5);
-
-  if (diff >= -2147483648LL && diff <= 2147483647LL) {
-    hook[0] = 0xE9;
-    *(int32_t *)(hook + 1) = (int32_t)diff;
-    memset(hook + 5, 0x90, 9);
-  } else {
-    hook[0] = 0xFF;
-    hook[1] = 0x25;
-    hook[2] = 0x00;
-    hook[3] = 0x00;
-    hook[4] = 0x00;
-    hook[5] = 0x00;
-    *(uint64_t *)(hook + 6) = (uint64_t)dst;
-  }
-
-  mprotect((void *)page_start, len, PROT_READ | PROT_EXEC);
-  __builtin___clear_cache((char *)hook, (char *)hook + 14);
 }
 
 /* Bypass DecodeTree caller at offset 0x427582 directly */
@@ -539,7 +467,7 @@ void jni_load(void) {
   uintptr_t decode_tree_addr = (uintptr_t)text_base + 0x427582;
   if (decode_tree_addr) {
     fprintf(stderr, "[drv] Hooking DecodeTree @ %p\n", (void *)decode_tree_addr);
-    hook_x86_jmp(decode_tree_addr, (uintptr_t)my_DecodeTreeStub);
+    hook_x64(decode_tree_addr, (uintptr_t)my_DecodeTreeStub);
   }
 
   hook_nvapk();
@@ -611,7 +539,6 @@ void jni_load(void) {
   if (OS_EGLContext) *OS_EGLContext = egl_c;
 
   if (OnResume) OnResume(fake_env, NULL);
-  start_async_file_worker();
 
   g_on_draw_frame = OnDrawFrame;
   g_can_render = canRender;

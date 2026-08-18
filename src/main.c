@@ -21,7 +21,7 @@
 #define CXX_HEAP_MB  48
 #define GAME_HEAP_MB 128
 
-int mod_game, mod_cxx;
+int mod_game;
 
 extern DynLibFunction dynlib_functions[];
 extern const int dynlib_functions_count;

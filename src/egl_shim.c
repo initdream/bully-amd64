@@ -12,10 +12,8 @@ SDL_Window *g_window = NULL;
 SDL_GLContext g_gl_context = NULL;
 
 static int g_w = 1280, g_h = 720;
-static int g_is_kmsdrm = 0;
 static int g_opengles_version = 0;
 
-int bully_is_kmsdrm(void) { return g_is_kmsdrm; }
 int bully_screen_w(void) { return g_w; }
 int bully_screen_h(void) { return g_h; }
 int bully_opengles_version(void) { return g_opengles_version ? g_opengles_version : 196608; }
@@ -76,10 +74,9 @@ int bully_init_gl(void) {
     if (!g_window) return 0;
 
     const char *drv = SDL_GetCurrentVideoDriver();
-  g_is_kmsdrm = (drv && SDL_strcmp(drv, "mali") != 0) ? 1 : 0;
-  fprintf(stderr, "[gl] backend %s %dx%d video='%s' kmsdrm=%d\n",
+  fprintf(stderr, "[gl] backend %s %dx%d video='%s'\n",
           windowed ? "windowed" : "fullscreen-desktop", g_w, g_h,
-          drv ? drv : "?", g_is_kmsdrm);
+          drv ? drv : "?");
 
   int ctx_maj = gles_maj, ctx_min = gles_min;
   for (int attempt = 0; attempt < 2 && !g_gl_context; attempt++) {
