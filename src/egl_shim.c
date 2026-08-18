@@ -60,6 +60,7 @@ int bully_init_gl(void) {
       SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8);
       SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, alpha_try[i]);
       SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
+      SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
       SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
       SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, msaa_try[j] ? 1 : 0);
       SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, msaa_try[j]);
@@ -91,12 +92,6 @@ int bully_init_gl(void) {
   }
   if (!g_gl_context) return 0;
   SDL_GL_MakeCurrent(g_window, g_gl_context);
-
-  glEnable(GL_DEPTH_TEST);
-  glDepthMask(GL_TRUE);
-  glEnable(GL_DITHER);
-  glClearDepthf(1.0f);
-  glClear(GL_DEPTH_BUFFER_BIT);
 
   const GLubyte *r = glGetString(GL_RENDERER), *v = glGetString(GL_VERSION);
   fprintf(stderr, "[gl] SDL2 GLES2 %dx%d | EGL dpy=%p surf=%p ctx=%p | %s / %s\n",
